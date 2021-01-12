@@ -89,6 +89,9 @@ pub struct Menu<'a> {
     pub pages: &'a [CreateMessage<'a>],
     /// The menu options.
     pub options: MenuOptions,
+    /// If anyone can interact or only self
+    pub locked: bool,
+    pub in_use: bool,
 }
 
 impl<'a> Menu<'a> {
@@ -104,6 +107,8 @@ impl<'a> Menu<'a> {
             msg,
             pages,
             options,
+            locked: true,
+            in_use: false,
         }
     }
 
@@ -201,6 +206,8 @@ impl<'a> Menu<'a> {
         let message = self.options.message.as_ref().unwrap();
         let mut reaction_collector = message
             .await_reactions(&self.ctx)
+            .removed(true)
+            .added(true)
             .timeout(Duration::from_secs_f64(self.options.timeout))
             .author_id(self.msg.author.id)
             .await;
@@ -211,16 +218,39 @@ impl<'a> Menu<'a> {
             let mut found_one = false;
 
             while let Some(item) = reaction_collector.next().await {
-                if let ReactionAction::Added(r) = item.as_ref() {
-                    if !found_one {
-                        found_one = true;
+                if !self.in_use {
+                    if let ReactionAction::Removed(r) = item.as_ref() {
+                        if let Some(id) = r.user_id {
+                            let r = r.as_ref().clone();
+                            if id == self.msg.author.id {
+                                if !found_one {
+                                    found_one = true;
+                                }
+
+                                if let Some(i) = self.process_reaction(&r) {
+                                    choice = Some(i);
+                                    reaction = Some(r);
+                                    break;
+                                }
+                            }
+                        }
                     }
 
-                    let r = r.as_ref().clone();
-                    if let Some(i) = self.process_reaction(&r) {
-                        choice = Some(i);
-                        reaction = Some(r);
-                        break;
+                    if let ReactionAction::Added(r) = item.as_ref() {
+                        let r = r.as_ref().clone();
+                        if let Some(id) = r.user_id {
+                            if id != self.msg.author.id && !self.locked {
+                                if !found_one {
+                                    found_one = true;
+                                }
+
+                                if let Some(i) = self.process_reaction(&r) {
+                                    choice = Some(i);
+                                    reaction = Some(r);
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -228,6 +258,10 @@ impl<'a> Menu<'a> {
             if !found_one {
                 return Err(Error::TimeoutError);
             }
+
+            self.in_use = true;
+            self.readd_reactions(message).await?;
+            self.in_use = false;
 
             (choice, reaction)
         };
@@ -259,6 +293,30 @@ impl<'a> Menu<'a> {
             }
         }
 
+        Ok(())
+    }
+
+    async fn readd_reactions(&self, msg: &Message) -> MenuResult {
+        for control in &self.options.controls {
+            self.ctx
+                .http
+                .delete_reaction(
+                    msg.channel_id.0,
+                    msg.id.0,
+                    Some(msg.author.id.0),
+                    &control.emoji,
+                )
+                .await
+                .unwrap_or_default();
+        }
+
+        for control in &self.options.controls {
+            self.ctx
+                .http
+                .create_reaction(msg.channel_id.0, msg.id.0, &control.emoji)
+                .await
+                .unwrap_or_default();
+        }
         Ok(())
     }
 
@@ -437,8 +495,6 @@ pub type ControlFunction = Arc<
 ///
 /// `next_page_cfn` is a [`ControlFunction`] and can be used to control a menu.
 pub async fn next_page(menu: &mut Menu<'_>, reaction: Reaction) {
-    let _ = reaction.delete(&menu.ctx.http).await;
-
     if menu.options.page == menu.pages.len() - 1 {
         menu.options.page = 0;
     } else {
@@ -460,8 +516,6 @@ pub async fn next_page(menu: &mut Menu<'_>, reaction: Reaction) {
 ///
 /// `prev_page_cfn` is a [`ControlFunction`] and can be used to control a menu.
 pub async fn prev_page(menu: &mut Menu<'_>, reaction: Reaction) {
-    let _ = reaction.delete(&menu.ctx.http).await;
-
     if menu.options.page == 0 {
         menu.options.page = menu.pages.len() - 1;
     } else {
