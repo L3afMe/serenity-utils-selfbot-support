@@ -197,7 +197,7 @@ impl<'a> Menu<'a> {
                     })
                     .await?;
 
-                self.add_reactions(&msg).await?;
+                self.dd_reactions(&msg).await?;
 
                 self.options.message = Some(msg);
             }
@@ -334,7 +334,18 @@ impl<'a> Menu<'a> {
 
     async fn clean_reactions(&self) -> MenuResult {
         if let Some(msg) = &self.options.message {
-            msg.delete_reactions(&self.ctx.http).await?;
+            for control in &self.options.controls {
+                self.ctx
+                    .http
+                    .delete_reaction(
+                        msg.channel_id.0,
+                        msg.id.0,
+                        Some(msg.author.id.0),
+                        &control.emoji,
+                    )
+                    .await
+                    .unwrap_or_default();
+            }
         }
 
         Ok(())
