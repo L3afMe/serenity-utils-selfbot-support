@@ -20,7 +20,7 @@ native_tls_backend = ["serenity/native_tls_backend"]
 rustls_backend = ["serenity/rustls_backend"]
 
 [dependencies.serenity]
-version = "0.9.1"
+version = "0.9.4"
 default-features = false
 features = ["client", "collector", "gateway", "model"]
 
