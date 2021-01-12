@@ -197,7 +197,7 @@ impl<'a> Menu<'a> {
                     })
                     .await?;
 
-                self.dd_reactions(&msg).await?;
+                self.add_reactions(&msg).await?;
 
                 self.options.message = Some(msg);
             }
